@@ -1,0 +1,12 @@
+[package]
+name = "png-parser"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+crc32fast = "1"
+dirs = "5"
+flate2 = "1"
+lcms2 = "6"
