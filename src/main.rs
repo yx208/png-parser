@@ -1,5 +1,7 @@
 extern crate crc32fast;
 
+mod win;
+
 use std::convert::TryInto;
 use std::fs::read;
 use std::io::Read;
@@ -49,7 +51,7 @@ fn parse_block(iter: &mut dyn Iterator<Item = &u8>) {
             "IDHR" => parse_ihdr_block(&block_body).unwrap(),
             "iCCP" => parse_iccp_block(&block_body).unwrap(),
             "pHYs" => parse_phys_block(&block_body).unwrap(),
-            "IDAT" => parse_iat_block(&block_body).unwrap(),
+            "IDAT" => parse_idat_block(&block_body).unwrap(),
             "IEND" => break,
             _ => ()
         }
@@ -73,6 +75,7 @@ fn parse_iccp_block(block: &Vec<u8>) -> Result<(), ()> {
 }
 
 fn parse_ihdr_block(block: &Vec<u8>) -> Result<(), ()> {
+
     let _width = u32::from_be_bytes(block[0..4].try_into().unwrap());
     let _height = u32::from_be_bytes(block[4..8].try_into().unwrap());
     let _depth = block.get(8).unwrap().to_owned();
@@ -80,19 +83,33 @@ fn parse_ihdr_block(block: &Vec<u8>) -> Result<(), ()> {
     let _compression = block.get(10).unwrap().to_owned();
     let _filter = block.get(11).unwrap().to_owned();
     let _interlace = block.get(12).unwrap().to_owned();
+
     Ok(())
 }
 
 fn parse_phys_block(block: &Vec<u8>) -> Result<(), ()> {
+
     let _x_pixels_per_unit  = u32::from_be_bytes(block[0..4].try_into().unwrap());
     let _y_pixels_per_unit  = u32::from_be_bytes(block[4..8].try_into().unwrap());
     let _unit_specifier = block.get(8).unwrap();
+
     Ok(())
 }
 
-fn parse_iat_block(block: &Vec<u8>) -> Result<(), ()> {
+fn parse_idat_block(block: &Vec<u8>) -> Result<(), ()> {
 
-    println!("{:?}", block);
+    // println!("{:?}", block);
+    let mut decoder = ZlibDecoder::new(&block[..]);
+    let mut decode_data = Vec::new();
+    decoder.read_to_end(&mut decode_data).unwrap();
+
+    println!("{:?}", block.len());
+    // println!("{:?}", decode_data.len());
+    let data = decode_data
+        .chunks(398 * 4 + 1)
+        .map(|chunk| chunk.to_vec())
+        .collect::<Vec<Vec<u8>>>();
+    println!("{}", data.len());
 
     Ok(())
 }
