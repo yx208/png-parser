@@ -1,21 +1,106 @@
 extern crate crc32fast;
 
 use std::convert::TryInto;
+use std::default::Default;
 use std::fs::read;
 use std::io::Read;
 
 use dirs::home_dir;
 use flate2::read::ZlibDecoder;
 use lcms2;
+use wgpu::TextureFormat;
+use winit::event::WindowEvent;
+use winit::window::Window;
+
+struct State {
+    surface: wgpu::Surface,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    config: wgpu::SurfaceConfiguration,
+    size: winit::dpi::PhysicalSize<u32>
+}
+
+impl State {
+    async fn new(window: &Window) -> Self {
+
+        let size = window.inner_size();
+
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::all(),
+            ..Default::default()
+        });
+        let surface = unsafe { instance.create_surface(window).unwrap() };
+        let adapter = instance
+            .enumerate_adapters(wgpu::Backends::all())
+            .filter(|adapter| adapter.is_surface_supported(&surface))
+            .next()
+            .unwrap();
+
+        let (device, queue) = adapter.request_device(
+            &wgpu::DeviceDescriptor {
+                features: wgpu::Features::empty(),
+                limits: if cfg!(target_arch = "wasm32") {
+                    wgpu::Limits::downlevel_webgl2_defaults()
+                } else {
+                    wgpu::Limits::default()
+                },
+                label: None
+            },
+            None
+        ).await.unwrap();
+
+        let caps = surface.get_capabilities(&adapter);
+        let config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: caps.formats[0],
+            width: size.width,
+            height: size.height,
+            present_mode: wgpu::PresentMode::Fifo,
+            alpha_mode: caps.alpha_modes[0],
+            view_formats: vec![],
+        };
+
+        surface.configure(&device, &config);
+
+        Self {
+            size,
+            surface,
+            device,
+            queue,
+            config
+        }
+    }
+
+    fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
+        todo!()
+    }
+
+    fn input(&mut self, event: &WindowEvent) -> bool {
+        todo!()
+    }
+
+    fn update(&mut self) {
+        todo!()
+    }
+
+    fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+        todo!()
+    }
+}
+
+
 
 fn main() {
 
-    let png_file = read(get_png_dir()).unwrap();
+    // run();
 
+}
+
+fn run() {
+    let png_file = read(get_png_dir()).unwrap();
     let (_, data) = png_file.split_at(8);
     let mut data_iter = data.iter();
     parse_block(&mut data_iter);
-
 }
 
 #[inline]
@@ -73,6 +158,7 @@ fn parse_iccp_block(block: &Vec<u8>) -> Result<(), ()> {
 }
 
 fn parse_ihdr_block(block: &Vec<u8>) -> Result<(), ()> {
+
     let _width = u32::from_be_bytes(block[0..4].try_into().unwrap());
     let _height = u32::from_be_bytes(block[4..8].try_into().unwrap());
     let _depth = block.get(8).unwrap().to_owned();
@@ -80,19 +166,25 @@ fn parse_ihdr_block(block: &Vec<u8>) -> Result<(), ()> {
     let _compression = block.get(10).unwrap().to_owned();
     let _filter = block.get(11).unwrap().to_owned();
     let _interlace = block.get(12).unwrap().to_owned();
+
     Ok(())
 }
 
 fn parse_phys_block(block: &Vec<u8>) -> Result<(), ()> {
+
     let _x_pixels_per_unit  = u32::from_be_bytes(block[0..4].try_into().unwrap());
     let _y_pixels_per_unit  = u32::from_be_bytes(block[4..8].try_into().unwrap());
     let _unit_specifier = block.get(8).unwrap();
+
     Ok(())
 }
 
 fn parse_iat_block(block: &Vec<u8>) -> Result<(), ()> {
 
-    println!("{:?}", block);
+    for window in block.chunks(398 * 4 + 1) {
+        // println!("{:?}", window);
+        println!("{:?}", window);
+    }
 
     Ok(())
 }
