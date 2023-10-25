@@ -1,5 +1,7 @@
 extern crate crc32fast;
 
+mod win;
+
 use std::convert::TryInto;
 use std::default::Default;
 use std::fs::read;
@@ -134,7 +136,7 @@ fn parse_block(iter: &mut dyn Iterator<Item = &u8>) {
             "IDHR" => parse_ihdr_block(&block_body).unwrap(),
             "iCCP" => parse_iccp_block(&block_body).unwrap(),
             "pHYs" => parse_phys_block(&block_body).unwrap(),
-            "IDAT" => parse_iat_block(&block_body).unwrap(),
+            "IDAT" => parse_idat_block(&block_body).unwrap(),
             "IEND" => break,
             _ => ()
         }
@@ -179,12 +181,19 @@ fn parse_phys_block(block: &Vec<u8>) -> Result<(), ()> {
     Ok(())
 }
 
-fn parse_iat_block(block: &Vec<u8>) -> Result<(), ()> {
+fn parse_idat_block(block: &Vec<u8>) -> Result<(), ()> {
 
-    for window in block.chunks(398 * 4 + 1) {
-        // println!("{:?}", window);
-        println!("{:?}", window);
-    }
+    // println!("{:?}", block);
+    let mut decoder = ZlibDecoder::new(&block[..]);
+    let mut decode_data = Vec::new();
+    decoder.read_to_end(&mut decode_data).unwrap();
+
+    println!("{:?}", block.len());
+    // println!("{:?}", decode_data.len());
+    let data = decode_data
+        .chunks(398 * 4 + 1)
+        .map(|chunk| chunk.to_vec())
+        .collect::<Vec<Vec<u8>>>();
 
     Ok(())
 }
