@@ -1,11 +1,36 @@
 extern crate crc32fast;
 
 use std::convert::TryInto;
-use std::default::Default;
 use std::io::Read;
 
 use dirs::home_dir;
 use flate2::read::ZlibDecoder;
+use minifb::{ Key, Window, WindowOptions };
+use minifb::Key::Key0;
+
+static WIDTH: usize = 398;
+static HEIGHT: usize = 398;
+
+fn render_image() {
+
+    let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
+    let mut window = Window::new(
+        "Test - ESC to exit",
+        WIDTH,
+        HEIGHT,
+        WindowOptions::default()
+    ).unwrap();
+
+    window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
+
+    while window.is_open() && !window.is_key_down(Key::Escape) {
+        for i in buffer.iter_mut() {
+            *i = 0;
+        }
+        window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
+    }
+
+}
 
 #[inline]
 fn task_iter(iter: &mut dyn Iterator<Item = &u8>, size: usize) -> Vec<u8> {
@@ -44,6 +69,8 @@ fn parse_block(iter: &mut dyn Iterator<Item = &u8>) {
         }
 
     }
+
+    render_image();
 }
 
 fn parse_iccp_block(block: &Vec<u8>) -> Result<(), ()> {
@@ -90,9 +117,7 @@ fn parse_idat_block(block: &Vec<u8>) -> Result<(), ()> {
     let mut decode_data = Vec::new();
     decoder.read_to_end(&mut decode_data).unwrap();
 
-    println!("{:?}", block.len());
-    // println!("{:?}", decode_data.len());
-    let _data = decode_data
+    let data = decode_data
         .chunks(398 * 4 + 1)
         .map(|chunk| chunk.to_vec())
         .collect::<Vec<Vec<u8>>>();
@@ -105,5 +130,14 @@ fn get_png_dir() -> String {
         .join("Desktop/pixels-large.png")
         .to_str().unwrap()
         .to_owned()
+}
+
+pub fn run() {
+
+    let png_data = std::fs::read(get_png_dir()).unwrap();
+    let (_, png_body) = png_data.split_at(8);
+    let mut iter = png_body.iter();
+    parse_block(&mut iter);
+
 }
 
