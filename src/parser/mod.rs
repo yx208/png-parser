@@ -2,6 +2,7 @@ extern crate crc32fast;
 
 use std::convert::TryInto;
 use std::io::Read;
+use std::process::exit;
 
 use dirs::home_dir;
 use flate2::read::ZlibDecoder;
@@ -10,22 +11,35 @@ use minifb::{ Key, Window, WindowOptions };
 static WIDTH: usize = 398;
 static HEIGHT: usize = 398;
 
-fn render_image() {
+#[inline]
+fn rgba_to_u32(rgba: &[u8]) -> u32 {
+    ((rgba[3] as u32) << 24) | ((rgba[0] as u32) << 16) | ((rgba[1] as u32) << 8) | (rgba[2] as u32)
+}
 
-    let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
+///
+/// Sub 过滤函数
+///
+fn decode_sub_filter(row: &[u8], prev_row: &[u8; 4]) -> [u8; 4] {
+    // println!("{:?}/{:?}", prev_row, row);
+    let mut result = [0, 0, 0, 0];
+    for i in 0..row.len() {
+        let v = (row[i] as i32 - prev_row[i] as i32).abs();
+        result[i] = v as u8;
+    }
+    result
+}
+
+fn render_image(buffer: Vec<u32>) {
+
+    // let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
     let mut window = Window::new(
         "Test - ESC to exit",
         WIDTH,
         HEIGHT,
         WindowOptions::default()
     ).unwrap();
-
     window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
-
     while window.is_open() && !window.is_key_down(Key::Escape) {
-        for i in buffer.iter_mut() {
-            *i = 0;
-        }
         window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
     }
 
@@ -110,18 +124,52 @@ fn parse_phys_block(block: &Vec<u8>) -> Result<(), ()> {
     Ok(())
 }
 
+fn parse_scan_line(line: &Vec<u8>) -> Vec<u32> {
+    let (filter_type, data) = line.split_at(1);
+    let filter_type = filter_type[0];
+    let temp: [u8; 4] = [0, 0, 0, 0];
+    data
+        .chunks(4)
+        .into_iter()
+        .scan(temp, |acc, chunk| {
+            *acc = match filter_type {
+                1..=4 => decode_sub_filter(chunk, acc),
+                _ => [0, 0, 0, 0]
+            };
+            Some(rgba_to_u32(acc))
+        })
+        .collect()
+}
+
 fn parse_idat_block(block: &Vec<u8>) -> Result<(), ()> {
 
     let mut decoder = ZlibDecoder::new(&block[..]);
     let mut decode_data = Vec::new();
     decoder.read_to_end(&mut decode_data).unwrap();
 
-    let data = decode_data
-        .chunks(398 * 4 + 1)
+    // 把数组转成以一根扫面线为一个 Vec 的 Vec
+    let decode_data: Vec<Vec<u8>> = decode_data
+        .chunks(1 + 4 * 398)
         .map(|chunk| chunk.to_vec())
-        .collect::<Vec<Vec<u8>>>();
+        .collect();
 
-    println!("{:?}", &data[0]);
+    println!("{:?}", &decode_data[1]);
+
+    // 迭代每一根扫描线，进行解析，返回一个集合，这个集合是解析扫描线转换后的 Vec<u32>
+    let decode_data: Vec<u32> = decode_data
+        .into_iter()
+        .map(|line| parse_scan_line(&line))
+        .into_iter()
+        .flatten()
+        .collect();
+
+    render_image(decode_data);
+
+    // let (_, data) = decode_data[0].split_at(1);
+    // let r: Vec<Vec<u8>> = data.chunks(4).map(|x| x.to_vec()).collect();
+    // println!("{:?}", &r);
+    //
+    // // println!("{:?}", &data[0]);
 
     Ok(())
 }
@@ -139,6 +187,21 @@ pub fn run() {
     let (_, png_body) = png_data.split_at(8);
     let mut iter = png_body.iter();
     parse_block(&mut iter);
+
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn test_parse_u32() {
+        let a = [255, 0, 0, 255];
+        let b = [0, 255, 255, 0];
+        let c = decode_sub_filter(&a, &b);
+        println!("{}", rgba_to_u32(&c));
+    }
 
 }
 
