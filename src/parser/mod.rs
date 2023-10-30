@@ -6,7 +6,6 @@ use std::io::Read;
 use dirs::home_dir;
 use flate2::read::ZlibDecoder;
 use minifb::{ Key, Window, WindowOptions };
-use minifb::Key::Key0;
 
 static WIDTH: usize = 398;
 static HEIGHT: usize = 398;
@@ -58,9 +57,8 @@ fn parse_block(iter: &mut dyn Iterator<Item = &u8>) {
         hasher.update(&block_body);
 
         assert_eq!(block_crc, hasher.finalize());
-
         match block_type.as_str() {
-            "IDHR" => parse_ihdr_block(&block_body).unwrap(),
+            "IHDR" => parse_ihdr_block(&block_body).unwrap(),
             "iCCP" => parse_iccp_block(&block_body).unwrap(),
             "pHYs" => parse_phys_block(&block_body).unwrap(),
             "IDAT" => parse_idat_block(&block_body).unwrap(),
@@ -70,7 +68,7 @@ fn parse_block(iter: &mut dyn Iterator<Item = &u8>) {
 
     }
 
-    render_image();
+    // render_image();
 }
 
 fn parse_iccp_block(block: &Vec<u8>) -> Result<(), ()> {
@@ -90,13 +88,15 @@ fn parse_iccp_block(block: &Vec<u8>) -> Result<(), ()> {
 
 fn parse_ihdr_block(block: &Vec<u8>) -> Result<(), ()> {
 
-    let _width = u32::from_be_bytes(block[0..4].try_into().unwrap());
-    let _height = u32::from_be_bytes(block[4..8].try_into().unwrap());
-    let _depth = block.get(8).unwrap().to_owned();
-    let _color_type = block.get(9).unwrap().to_owned();
+    let width = u32::from_be_bytes(block[0..4].try_into().unwrap());
+    let height = u32::from_be_bytes(block[4..8].try_into().unwrap());
+    let depth = block.get(8).unwrap().to_owned();
+    let color_type = block.get(9).unwrap().to_owned();
     let _compression = block.get(10).unwrap().to_owned();
-    let _filter = block.get(11).unwrap().to_owned();
-    let _interlace = block.get(12).unwrap().to_owned();
+    let filter = block.get(11).unwrap().to_owned();
+    let interlace = block.get(12).unwrap().to_owned();
+
+    println!("宽度：{width} \t 高度：{height} \t 通道深度：{depth} \t 色彩类型：{color_type} \t 过滤类型：{filter} \t 交错：{interlace}");
 
     Ok(())
 }
@@ -112,7 +112,6 @@ fn parse_phys_block(block: &Vec<u8>) -> Result<(), ()> {
 
 fn parse_idat_block(block: &Vec<u8>) -> Result<(), ()> {
 
-    // println!("{:?}", block);
     let mut decoder = ZlibDecoder::new(&block[..]);
     let mut decode_data = Vec::new();
     decoder.read_to_end(&mut decode_data).unwrap();
@@ -121,6 +120,8 @@ fn parse_idat_block(block: &Vec<u8>) -> Result<(), ()> {
         .chunks(398 * 4 + 1)
         .map(|chunk| chunk.to_vec())
         .collect::<Vec<Vec<u8>>>();
+
+    println!("{:?}", &data[0]);
 
     Ok(())
 }
