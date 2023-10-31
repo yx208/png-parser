@@ -2,7 +2,7 @@
 
 mod win;
 mod parser;
+mod utils;
 
 fn main() {
-    parser::run();
 }

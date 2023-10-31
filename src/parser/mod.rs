@@ -1,12 +1,16 @@
 extern crate crc32fast;
 
 use std::convert::TryInto;
+use std::fs::read;
 use std::io::Read;
-use std::process::exit;
+use std::usize;
 
-use dirs::home_dir;
 use flate2::read::ZlibDecoder;
 use minifb::{ Key, Window, WindowOptions };
+use super::utils::{
+    get_png_dir,
+    u8_4_to_usize
+};
 
 static WIDTH: usize = 398;
 static HEIGHT: usize = 398;
@@ -174,19 +178,116 @@ fn parse_idat_block(block: &Vec<u8>) -> Result<(), ()> {
     Ok(())
 }
 
-fn get_png_dir() -> String {
-    home_dir().unwrap()
-        .join("Desktop/pixels-large.png")
-        .to_str().unwrap()
-        .to_owned()
-}
-
 pub fn run() {
 
-    let png_data = std::fs::read(get_png_dir()).unwrap();
-    let (_, png_body) = png_data.split_at(8);
-    let mut iter = png_body.iter();
-    parse_block(&mut iter);
+    // let png_data = std::fs::read(get_png_dir()).unwrap();
+    // let (_, png_body) = png_data.split_at(8);
+    // let mut iter = png_body.iter();
+    // parse_block(&mut iter);
+
+}
+
+struct PngParam {
+    width: u32,
+    height: u32,
+    depth: u8,
+    color_type: u8,
+    compression: u8,
+    filter: u8,
+    interlace: bool
+}
+
+pub struct PngParser {
+    params: Option<PngParam>,
+    raw_data: Vec<u8>,
+    file_path: String,
+    index: usize
+}
+
+impl PngParser {
+
+    pub fn new(png_path: String) -> Self {
+
+        let png_sign: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
+        let mut png_data = read(&png_path).expect("无法读取图片");
+
+        if !png_data.starts_with(&png_sign) {
+            panic!("并不是 png 图片");
+        }
+
+        png_data.drain(0..8);
+
+        Self {
+            params: None,
+            raw_data: png_data,
+            file_path: png_path.to_owned(),
+            index: 0,
+        }
+    }
+
+    pub fn parse(&mut self) {
+
+        let raw_data_size = self.raw_data.len();
+
+        if raw_data_size < 8 {
+            panic!("解析图片数据块头部出错");
+        }
+
+        while self.index < raw_data_size {
+
+            // 解析出块头部
+            let block_size = &self.raw_data[self.index..self.index + 4];
+            let block_type = &self.raw_data[self.index + 4..self.index + 8];
+            let block_size = u8_4_to_usize(block_size);
+            self.index += 8;
+
+            // 当前已索引大小 + 当前块内容需要的大小 + 4 字节的 crc
+            if raw_data_size < (self.index + block_size + 4) {
+                panic!("解析图片数据块内容出错");
+            }
+
+            // 解析出块内容
+            let offset_end_size = self.index + block_size;
+            let block_data = &self.raw_data[self.index..offset_end_size];
+            let block_crc = u32::from_be_bytes(
+                (&self.raw_data[offset_end_size..offset_end_size + 4])
+                    .try_into()
+                    .unwrap()
+            );
+            self.index = offset_end_size + 4;
+
+            // 检查 crc
+            let mut hasher = crc32fast::Hasher::new();
+            hasher.update(block_type);
+            hasher.update(block_data);
+            if block_crc != hasher.finalize() {
+                panic!("CRC 校验失败");
+            }
+
+            // 解析具体块内容
+            let block_type = unsafe { std::str::from_utf8_unchecked(block_type) };
+            match block_type {
+                "IHDR" => {
+
+                }
+                "iCCP" => {
+
+                }
+                "pHYs" => {
+
+                }
+                "IDAT" => {
+
+                }
+                "IEND" => {
+
+                }
+                _ => {}
+            }
+
+        }
+
+    }
 
 }
 
@@ -194,6 +295,13 @@ pub fn run() {
 mod tests {
 
     use super::*;
+
+    #[test]
+    fn should_be_run() {
+        let png_path = get_png_dir();
+        let mut parser = PngParser::new(png_path);
+        parser.parse();
+    }
 
     #[test]
     fn test_parse_u32() {
