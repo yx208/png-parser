@@ -3,6 +3,7 @@ extern crate crc32fast;
 use std::convert::TryInto;
 use std::fs::read;
 use std::io::Read;
+use std::ops::Sub;
 use std::usize;
 
 use flate2::read::ZlibDecoder;
@@ -33,7 +34,7 @@ fn decode_sub_filter(row: &[u8], prev_row: &[u8; 4]) -> [u8; 4] {
     result
 }
 
-fn render_image(buffer: Vec<u32>) {
+fn render_image(buffer: &Vec<u32>) {
 
     // let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
     let mut window = Window::new(
@@ -54,41 +55,6 @@ fn task_iter(iter: &mut dyn Iterator<Item = &u8>, size: usize) -> Vec<u8> {
     iter.take(size).cloned().collect::<Vec<u8>>()
 }
 
-fn parse_block(iter: &mut dyn Iterator<Item = &u8>) {
-
-    println!("块大小 \t 块类型 \t crc");
-
-    loop {
-
-        // 取出块头部信息
-        let block_head = task_iter(iter, 8);
-        let block_size = u32::from_be_bytes(block_head[0..4].try_into().unwrap());
-        let block_type = String::from_utf8(block_head[4..8].try_into().unwrap()).unwrap();
-        let block_body = task_iter(iter, block_size as usize);
-        let block_crc = u32::from_be_bytes(task_iter(iter, 4).try_into().unwrap());
-
-        println!("{block_size} \t {block_type} \t\t {block_crc}");
-
-        // 检查 crc
-        let mut hasher = crc32fast::Hasher::new();
-        hasher.update(block_type.as_bytes());
-        hasher.update(&block_body);
-
-        assert_eq!(block_crc, hasher.finalize());
-        match block_type.as_str() {
-            "IHDR" => parse_ihdr_block(&block_body).unwrap(),
-            "iCCP" => parse_iccp_block(&block_body).unwrap(),
-            "pHYs" => parse_phys_block(&block_body).unwrap(),
-            "IDAT" => parse_idat_block(&block_body).unwrap(),
-            "IEND" => break,
-            _ => ()
-        }
-
-    }
-
-    // render_image();
-}
-
 fn parse_iccp_block(block: &Vec<u8>) -> Result<(), ()> {
 
     let index = block.iter().position(|&x| x == 0u8).unwrap() + 1;
@@ -100,30 +66,6 @@ fn parse_iccp_block(block: &Vec<u8>) -> Result<(), ()> {
     let mut zlib_decoder = ZlibDecoder::new(part2);
     zlib_decoder.read_to_end(&mut icc_data).unwrap();
     let _data = lcms2::Profile::new_icc(&icc_data).unwrap();
-
-    Ok(())
-}
-
-fn parse_ihdr_block(block: &Vec<u8>) -> Result<(), ()> {
-
-    let width = u32::from_be_bytes(block[0..4].try_into().unwrap());
-    let height = u32::from_be_bytes(block[4..8].try_into().unwrap());
-    let depth = block.get(8).unwrap().to_owned();
-    let color_type = block.get(9).unwrap().to_owned();
-    let _compression = block.get(10).unwrap().to_owned();
-    let filter = block.get(11).unwrap().to_owned();
-    let interlace = block.get(12).unwrap().to_owned();
-
-    println!("宽度：{width} \t 高度：{height} \t 通道深度：{depth} \t 色彩类型：{color_type} \t 过滤类型：{filter} \t 交错：{interlace}");
-
-    Ok(())
-}
-
-fn parse_phys_block(block: &Vec<u8>) -> Result<(), ()> {
-
-    let _x_pixels_per_unit  = u32::from_be_bytes(block[0..4].try_into().unwrap());
-    let _y_pixels_per_unit  = u32::from_be_bytes(block[4..8].try_into().unwrap());
-    let _unit_specifier = block.get(8).unwrap();
 
     Ok(())
 }
@@ -167,7 +109,7 @@ fn parse_idat_block(block: &Vec<u8>) -> Result<(), ()> {
         .flatten()
         .collect();
 
-    render_image(decode_data);
+    render_image(&decode_data);
 
     // let (_, data) = decode_data[0].split_at(1);
     // let r: Vec<Vec<u8>> = data.chunks(4).map(|x| x.to_vec()).collect();
@@ -197,11 +139,163 @@ struct PngParam {
     interlace: bool
 }
 
+impl PngParam {
+    fn new(raw_body: &[u8]) -> Self {
+        let width = u32::from_be_bytes((&raw_body[0..4]).try_into().unwrap());
+        let height = u32::from_be_bytes((&raw_body[4..8]).try_into().unwrap());
+        let depth = raw_body[8];
+        let color_type = raw_body[9];
+        let compression = raw_body[10];
+        let filter = raw_body[11];
+        let interlace = raw_body[12] == 1;
+
+        PngParam {
+            width,
+            height,
+            depth,
+            color_type,
+            compression,
+            filter,
+            interlace
+        }
+    }
+}
+
+struct PhysParam {
+    x_pixels_per_unit: u32,
+    y_pixels_per_unit: u32,
+    unit_specifier: u8,
+}
+
+impl PhysParam {
+    fn new(raw_body: &[u8]) -> Self {
+
+        let x_pixels_per_unit  = u32::from_be_bytes(raw_body[0..4].try_into().unwrap());
+        let y_pixels_per_unit  = u32::from_be_bytes(raw_body[4..8].try_into().unwrap());
+        let unit_specifier = raw_body[8];
+
+        Self {
+            x_pixels_per_unit,
+            y_pixels_per_unit,
+            unit_specifier
+        }
+    }
+}
+
+/// 暂时只考虑真彩色图片
+struct Pixel {
+    r: u8,
+    g: u8,
+    b: u8,
+    a: u8
+}
+
+impl Sub for Pixel {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Pixel {
+        Pixel {
+            r: self.r - rhs.r,
+            g: self.g - rhs.g,
+            b: self.b - rhs.b,
+            a: self.a - rhs.a
+        }
+    }
+}
+
+struct Scanline {
+    filter: u8,
+    color_channel: usize,
+    data: Vec<u8>
+}
+
+impl Scanline {
+
+    fn new(bytes: &[u8], color_type: u8) -> Scanline {
+
+        let color_channel = match color_type {
+            0 => 1,
+            2 => 3,
+            3 => 1,
+            4 => 2,
+            6 => 4,
+            _ => panic!("错误的颜色类型")
+        };
+
+        if (bytes.len() - 1) % color_channel != 0  {
+            panic!("扫描线长度异常");
+        }
+
+        // let mut data: Vec<Pixel> = Vec::new();
+        // let pixels = (bytes.len() - 1) / color_channel;
+        // for pixel in 0..pixels {
+        //     let index = pixel * color_channel + 1;
+        //     data.push(Pixel {
+        //         r: bytes[index],
+        //         g: bytes[index + 1],
+        //         b: bytes[index + 2],
+        //         a: bytes[index + 3]
+        //     });
+        // }
+
+        Scanline {
+            color_channel,
+            data: bytes[1..].to_vec(),
+            filter: bytes[0],
+        }
+    }
+
+    fn decode_sub(&self) -> Vec<u32> {
+
+        let mut result: Vec<u32> = Vec::new();
+
+        #[inline]
+        fn sub_filter(a: u8, b: u8) -> u8 {
+            let c = a as i32 - b as i32;
+            if c < 0 {
+                255
+            } else {
+                c as u8
+            }
+        }
+
+        // [255, 0, 0, 255]
+        // [1, 255, 0, 0]
+
+        let mut previous: [u8; 4] = [0, 0, 0, 0];
+        let pixels = self.data.len() / self.color_channel;
+        for pixel in 0..pixels {
+            let index = pixel * self.color_channel;
+
+            previous[0] = sub_filter(self.data[index], previous[0]);
+            previous[1] = sub_filter(self.data[index + 1], previous[1]);
+            previous[2] = sub_filter(self.data[index + 2], previous[2]);
+            previous[3] = sub_filter(self.data[index + 3], previous[3]);
+
+            let decode = rgba_to_u32(&previous);
+
+            if self.filter == 1 {
+                println!("{:?}", previous);
+            }
+
+            result.push(decode);
+        }
+
+        if self.filter == 1 {
+            println!("{:?}", result);
+        }
+
+        result
+    }
+
+}
+
 pub struct PngParser {
     params: Option<PngParam>,
+    phys: Option<PhysParam>,
     raw_data: Vec<u8>,
     file_path: String,
-    index: usize
+    index: usize,
 }
 
 impl PngParser {
@@ -219,6 +313,7 @@ impl PngParser {
 
         Self {
             params: None,
+            phys: None,
             raw_data: png_data,
             file_path: png_path.to_owned(),
             index: 0,
@@ -267,25 +362,49 @@ impl PngParser {
             // 解析具体块内容
             let block_type = unsafe { std::str::from_utf8_unchecked(block_type) };
             match block_type {
-                "IHDR" => {
-
-                }
-                "iCCP" => {
-
-                }
-                "pHYs" => {
-
-                }
-                "IDAT" => {
-
-                }
-                "IEND" => {
-
-                }
-                _ => {}
+                "IHDR" => self.params = Some(PngParam::new(block_data)),
+                "iCCP" => {},
+                "pHYs" => self.phys = Some(PhysParam::new(block_data)),
+                "IDAT" => self.parse_idat_block(block_data),
+                "IEND" => self.parse_iend_block(),
+                _ => panic!("解析到不支持的 png 块")
             }
 
         }
+
+    }
+
+    fn parse_iend_block(&mut self) {
+
+    }
+
+    fn parse_idat_block(&self, raw_body: &[u8]) {
+
+        let mut decoder = ZlibDecoder::new(raw_body);
+        let mut decode_data = Vec::new();
+        decoder.read_to_end(&mut decode_data).expect("解压 IDAT 块数据失败");
+
+        let Some(params) = &self.params else {
+            panic!("Not params");
+        };
+
+        let scanline_vec: Vec<u32> = decode_data
+            .chunks((1 + 4 * params.width) as usize)
+            .map(|chunk| Scanline::new(chunk, params.color_type).decode_sub())
+            .flatten()
+            .collect();
+
+        let demo = scanline_vec[0..398].to_owned();
+        let mut rr = Vec::new();
+        for _ in 0..398 {
+            rr.append(&mut demo.clone());
+        }
+
+        render_image(&rr);
+
+        // for item in scanline_vec {
+        //     // println!("{}", item.filter);
+        // }
 
     }
 
