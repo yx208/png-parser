@@ -4,131 +4,17 @@ use std::convert::TryInto;
 use std::fs::read;
 use std::io::Read;
 use std::ops::Sub;
-use std::usize;
 
 use flate2::read::ZlibDecoder;
-use minifb::{ Key, Window, WindowOptions };
+
 use super::utils::{
     get_png_dir,
-    u8_4_to_usize
+    u8_4_to_usize,
+    rgba_to_u32,
+    render_image,
 };
 
-static WIDTH: usize = 398;
-static HEIGHT: usize = 398;
-
-#[inline]
-fn rgba_to_u32(rgba: &[u8]) -> u32 {
-    ((rgba[3] as u32) << 24) | ((rgba[0] as u32) << 16) | ((rgba[1] as u32) << 8) | (rgba[2] as u32)
-}
-
-///
-/// Sub 过滤函数
-///
-fn decode_sub_filter(row: &[u8], prev_row: &[u8; 4]) -> [u8; 4] {
-    // println!("{:?}/{:?}", prev_row, row);
-    let mut result = [0, 0, 0, 0];
-    for i in 0..row.len() {
-        let v = (row[i] as i32 - prev_row[i] as i32).abs();
-        result[i] = v as u8;
-    }
-    result
-}
-
-fn render_image(buffer: &Vec<u32>) {
-
-    // let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
-    let mut window = Window::new(
-        "Test - ESC to exit",
-        WIDTH,
-        HEIGHT,
-        WindowOptions::default()
-    ).unwrap();
-    window.limit_update_rate(Some(std::time::Duration::from_micros(16600)));
-    while window.is_open() && !window.is_key_down(Key::Escape) {
-        window.update_with_buffer(&buffer, WIDTH, HEIGHT).unwrap();
-    }
-
-}
-
-#[inline]
-fn task_iter(iter: &mut dyn Iterator<Item = &u8>, size: usize) -> Vec<u8> {
-    iter.take(size).cloned().collect::<Vec<u8>>()
-}
-
-fn parse_iccp_block(block: &Vec<u8>) -> Result<(), ()> {
-
-    let index = block.iter().position(|&x| x == 0u8).unwrap() + 1;
-    let part1 = &block[..index];
-    let part2 = &block[index + 1..];
-    let _name = String::from_utf8(part1.try_into().unwrap()).unwrap();
-
-    let mut icc_data = Vec::new();
-    let mut zlib_decoder = ZlibDecoder::new(part2);
-    zlib_decoder.read_to_end(&mut icc_data).unwrap();
-    let _data = lcms2::Profile::new_icc(&icc_data).unwrap();
-
-    Ok(())
-}
-
-fn parse_scan_line(line: &Vec<u8>) -> Vec<u32> {
-    let (filter_type, data) = line.split_at(1);
-    let filter_type = filter_type[0];
-    let temp: [u8; 4] = [0, 0, 0, 0];
-    data
-        .chunks(4)
-        .into_iter()
-        .scan(temp, |acc, chunk| {
-            *acc = match filter_type {
-                1..=4 => decode_sub_filter(chunk, acc),
-                _ => [0, 0, 0, 0]
-            };
-            Some(rgba_to_u32(acc))
-        })
-        .collect()
-}
-
-fn parse_idat_block(block: &Vec<u8>) -> Result<(), ()> {
-
-    let mut decoder = ZlibDecoder::new(&block[..]);
-    let mut decode_data = Vec::new();
-    decoder.read_to_end(&mut decode_data).unwrap();
-
-    // 把数组转成以一根扫面线为一个 Vec 的 Vec
-    let decode_data: Vec<Vec<u8>> = decode_data
-        .chunks(1 + 4 * 398)
-        .map(|chunk| chunk.to_vec())
-        .collect();
-
-    println!("{:?}", &decode_data[1]);
-
-    // 迭代每一根扫描线，进行解析，返回一个集合，这个集合是解析扫描线转换后的 Vec<u32>
-    let decode_data: Vec<u32> = decode_data
-        .into_iter()
-        .map(|line| parse_scan_line(&line))
-        .into_iter()
-        .flatten()
-        .collect();
-
-    render_image(&decode_data);
-
-    // let (_, data) = decode_data[0].split_at(1);
-    // let r: Vec<Vec<u8>> = data.chunks(4).map(|x| x.to_vec()).collect();
-    // println!("{:?}", &r);
-    //
-    // // println!("{:?}", &data[0]);
-
-    Ok(())
-}
-
-pub fn run() {
-
-    // let png_data = std::fs::read(get_png_dir()).unwrap();
-    // let (_, png_body) = png_data.split_at(8);
-    // let mut iter = png_body.iter();
-    // parse_block(&mut iter);
-
-}
-
+#[derive(Debug)]
 struct PngParam {
     width: u32,
     height: u32,
@@ -252,11 +138,7 @@ impl Scanline {
         #[inline]
         fn sub_filter(a: u8, b: u8) -> u8 {
             let c = a as i32 - b as i32;
-            if c < 0 {
-                255
-            } else {
-                c as u8
-            }
+            c.abs() as u8
         }
 
         // [255, 0, 0, 255]
@@ -274,16 +156,16 @@ impl Scanline {
 
             let decode = rgba_to_u32(&previous);
 
-            if self.filter == 1 {
-                println!("{:?}", previous);
-            }
+            // if self.filter == 1 {
+            //     println!("{:?}", previous);
+            // }
 
             result.push(decode);
         }
 
-        if self.filter == 1 {
-            println!("{:?}", result);
-        }
+        // if self.filter == 1 {
+        //     println!("{:?}", result);
+        // }
 
         result
     }
@@ -364,6 +246,8 @@ impl PngParser {
             match block_type {
                 "IHDR" => self.params = Some(PngParam::new(block_data)),
                 "iCCP" => {},
+                "sRGB" => {},
+                "iDOT" => {},
                 "pHYs" => self.phys = Some(PhysParam::new(block_data)),
                 "IDAT" => self.parse_idat_block(block_data),
                 "IEND" => self.parse_iend_block(),
@@ -379,6 +263,8 @@ impl PngParser {
     }
 
     fn parse_idat_block(&self, raw_body: &[u8]) {
+
+        println!("{:?}", &self.params);
 
         let mut decoder = ZlibDecoder::new(raw_body);
         let mut decode_data = Vec::new();
@@ -400,7 +286,7 @@ impl PngParser {
             rr.append(&mut demo.clone());
         }
 
-        render_image(&rr);
+        render_image(398, 398, &rr);
 
         // for item in scanline_vec {
         //     // println!("{}", item.filter);
@@ -420,14 +306,6 @@ mod tests {
         let png_path = get_png_dir();
         let mut parser = PngParser::new(png_path);
         parser.parse();
-    }
-
-    #[test]
-    fn test_parse_u32() {
-        let a = [255, 0, 0, 255];
-        let b = [0, 255, 255, 0];
-        let c = decode_sub_filter(&a, &b);
-        println!("{}", rgba_to_u32(&c));
     }
 
 }
